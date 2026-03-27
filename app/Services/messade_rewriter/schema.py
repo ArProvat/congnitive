@@ -27,26 +27,21 @@ TONE_INSTRUCTIONS: dict[Tone, str] = {
           "Rewrite as a high-level executive summary — precise, authoritative, minimal words."
      ),
 }
-class RewriteRequest(BaseModel):
-     message: str = Field(
-          ...,
-          min_length=1,
-          max_length=4000,
-          description="The original message to rewrite",
-          examples=["hey just wanted to check if u got my email, lmk asap thx"],
-     )
-     tone: Tone = Field(
-          default=Tone.friendly_professional,
-          description="The desired tone for the rewritten message",
-     )
-     model: str = Field(
-          default="gpt-4o",
-          description="OpenAI model to use",
-          examples=["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"],
-     )
 
-class RewriteResponse(BaseModel):
-     original: str = Field(..., description="The original message")
-     rewritten: str = Field(..., description="The professionally rewritten message")
-     tone: Tone = Field(..., description="The tone applied")
+class RefineRequest(BaseModel):
+     message: str
  
+class Improvement(BaseModel):
+     title: str
+     description: str
+     
+class RefineResponse(BaseModel):
+     polished_message: str
+     highlighted_phrases: list[str]
+     key_improvements: list[Improvement]
+     mood: str
+     method: str
+     goal: str
+     original_char_count: int
+     polished_char_count: int
+     
