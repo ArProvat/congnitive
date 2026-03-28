@@ -3,3 +3,10 @@ uvicorn
 openai
 pydantic
 python-dotenv
+langgraph
+langchain-openai
+langgraph-checkpoint-mongodb
+langchain-core
+motor
+pymongo
+pydantic-settings
