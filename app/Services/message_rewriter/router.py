@@ -6,7 +6,11 @@ from app.Services.message_rewriter.schema import RefineRequest, RefineResponse
 router = APIRouter()
 service = RefineMessageService()
 
-@router.post("/refine", response_model=RefineResponse)
+@router.post("/refine",
+     response_model=RefineResponse,
+     summary="Refine a message",
+     tags=["Message Refiner"],
+)
 async def refine_message(message: str):
      try:
           return await service.refine_message(message)
