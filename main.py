@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.Services.person_analysis.router import router as analysis_router
+from app.Services.message_rewriter.router import router as rewriter_router
 
 
 
@@ -16,7 +18,8 @@ app.add_middleware(
      allow_headers=["*"],
 )
 
-
+app.include_router(analysis_router)
+app.include_router(rewriter_router)
 
 @app.get("/health")
 async def health_check():

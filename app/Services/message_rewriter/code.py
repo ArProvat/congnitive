@@ -1,11 +1,11 @@
 from app.prompt.prompt import REWRITER_SYSTEM_PROMPT
 from openai import AsyncOpenAI
-from app.config.settings import settings
+from app.config.settings import get_settings
 from fastapi import HTTPException
-from app.Services.messade_rewriter.schema import RefineResponse, Improvement
+from app.Services.message_rewriter.schema import RefineResponse, Improvement
 import json
 
-
+settings = get_settings()
 class RefineMessageService:
      def __init__(self):
           self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)

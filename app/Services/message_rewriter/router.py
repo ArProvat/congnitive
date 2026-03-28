@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from app.Services.messade_rewriter.code import RefineMessageService
-from app.Services.messade_rewriter.schema import RefineRequest, RefineResponse
+from app.Services.message_rewriter.code import RefineMessageService
+from app.Services.message_rewriter.schema import RefineRequest, RefineResponse
 
 
 router = APIRouter()
