@@ -20,6 +20,7 @@ from typing import AsyncGenerator
 
 from langchain_core.messages import AIMessageChunk
 
+from app.DB.mongodb.mongodb import SessionRepository
 from .schema import AnswerItem
 
 logger = logging.getLogger(__name__)
@@ -27,21 +28,15 @@ logger = logging.getLogger(__name__)
 Q_DELIMITER = "---Q---"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ─── Shared helpers ───────────────────────────────────────────────────────────
 
 def _sse(event_type: str, payload: dict) -> str:
-     """Format one SSE message (data line + mandatory blank line)."""
      return f"data: {json.dumps({'event': event_type, **payload})}\n\n"
 
 
 def _make_config(session_id: str, user_id: str, stage: str) -> dict:
-     """
-     LangGraph runtime config.
-     thread_id  →  identifies the conversation in MongoDB
-     metadata   →  stored alongside each checkpoint (queryable later)
-     """
      return {
           "configurable": {"thread_id": session_id},
           "metadata": {"user_id": user_id, "stage": stage},
@@ -49,10 +44,6 @@ def _make_config(session_id: str, user_id: str, stage: str) -> dict:
 
 
 async def _collect_ai_tokens(agent, message: str, config: dict) -> str:
-     """
-     Run the agent and collect all AI tokens into a single string.
-     Used when the full response must be parsed before emitting (Stage 3).
-     """
      full = ""
      async for chunk, _ in agent.astream(
           {"messages": [{"role": "user", "content": message}]},
@@ -64,16 +55,12 @@ async def _collect_ai_tokens(agent, message: str, config: dict) -> str:
      return full
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stage 1 + 2 — Question streaming
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Stage 1+2 — Question streaming ──────────────────────────────────────────
 
 def _parse_question(raw: str) -> dict | None:
      raw = raw.strip()
      if raw.startswith("```"):
-          raw = "\n".join(
-               ln for ln in raw.splitlines() if not ln.startswith("```")
-          ).strip()
+          raw = "\n".join(ln for ln in raw.splitlines() if not ln.startswith("```")).strip()
      if not raw:
           return None
      try:
@@ -81,31 +68,34 @@ def _parse_question(raw: str) -> dict | None:
      except json.JSONDecodeError as exc:
           logger.warning("Question JSON parse error: %s | raw=%.200s", exc, raw)
           return None
-     required = {"id", "text", "category", "options"}
-     if not required.issubset(data):
-          logger.warning("Question missing fields: %s", required - data.keys())
+     if not {"id", "text", "category", "options"}.issubset(data):
           return None
      if not isinstance(data["options"], list) or len(data["options"]) < 2:
-          logger.warning("Question has too few options")
           return None
      return data
 
 
 async def stream_questions_sse(
      agent,
+     repo: SessionRepository,
      user_message: str,
      session_id: str,
      user_id: str,
+     client_description: str,
+     client_type: str | None,
 ) -> AsyncGenerator[str, None]:
      """
      Stage 1+2 SSE generator.
-     Buffers tokens, emits one 'question' event per parsed ---Q--- block.
+     Creates the session doc, streams questions, saves each one as it arrives.
      """
      config = _make_config(session_id, user_id, "question_generation")
      buffer = ""
      question_count = 0
 
      try:
+          # ── Persist: create session record ────────────────────────────────────
+          await repo.create_session(session_id, user_id, client_description, client_type)
+
           yield _sse("session_created", {"session_id": session_id, "user_id": user_id})
 
           async for chunk, _ in agent.astream(
@@ -123,14 +113,21 @@ async def stream_questions_sse(
                     q = _parse_question(before)
                     if q:
                          question_count += 1
-                         logger.debug("Q%d emitted: %s", question_count, q["id"])
+                         # ── Persist: save question as it arrives ─────────────────
+                         await repo.append_question(session_id, q)
+                         logger.debug("Q%d saved + emitted: %s", question_count, q["id"])
                          yield _sse("question", {"question": q})
 
+          # Flush remainder (last question may lack trailing delimiter)
           if buffer.strip():
                q = _parse_question(buffer)
                if q:
                     question_count += 1
+                    await repo.append_question(session_id, q)
                     yield _sse("question", {"question": q})
+
+          # ── Persist: mark stage done ───────────────────────────────────────────
+          await repo.mark_questions_done(session_id)
 
           yield _sse("done", {
                "session_id": session_id,
@@ -143,15 +140,9 @@ async def stream_questions_sse(
           yield _sse("error", {"message": str(exc), "session_id": session_id})
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stage 3 — Analysis streaming
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Stage 3 — Analysis streaming ────────────────────────────────────────────
 
 def _build_answers_message(answers: list[AnswerItem]) -> str:
-     """
-     Build a rich structured text summary of the user's answers.
-     This becomes the 3rd human turn in the LangGraph thread.
-     """
      category_labels = {
           "communication_style": "Communication Style",
           "decision_making":     "Decision Making",
@@ -177,12 +168,9 @@ def _build_answers_message(answers: list[AnswerItem]) -> str:
 
 
 def _parse_analysis(raw: str) -> dict | None:
-     """Extract and validate the JSON analysis from the raw LLM response."""
      raw = raw.strip()
      if raw.startswith("```"):
-          raw = "\n".join(
-               ln for ln in raw.splitlines() if not ln.startswith("```")
-          ).strip()
+          raw = "\n".join(ln for ln in raw.splitlines() if not ln.startswith("```")).strip()
      start = raw.find("{")
      end   = raw.rfind("}") + 1
      if start == -1 or end == 0:
@@ -206,17 +194,14 @@ def _parse_analysis(raw: str) -> dict | None:
 
 async def stream_analysis_sse(
      agent,
+     repo: SessionRepository,
      answers: list[AnswerItem],
      session_id: str,
      user_id: str,
 ) -> AsyncGenerator[str, None]:
      """
      Stage 3 SSE generator.
-
-     Emits:
-          thinking   → immediate ACK so the frontend can show a loading state
-          analysis   → the complete structured analysis (once LLM finishes)
-          done       → end signal with hint for Stage 4
+     Saves answers immediately, then saves analysis once parsed.
      """
      config = _make_config(session_id, user_id, "analysis")
      answers_message = _build_answers_message(answers)
@@ -227,7 +212,12 @@ async def stream_analysis_sse(
                "message": "Analysing client profile…",
           })
 
-          # JSON must be complete before parsing, so collect all tokens first
+          # ── Persist: save submitted answers ───────────────────────────────────
+          await repo.save_answers(
+               session_id,
+               [a.model_dump() for a in answers],
+          )
+
           raw_response = await _collect_ai_tokens(agent, answers_message, config)
           logger.debug("Analysis raw response (%.200s…)", raw_response)
 
@@ -240,46 +230,39 @@ async def stream_analysis_sse(
                })
                return
 
-          yield _sse("analysis", {
-               "session_id": session_id,
-               "analysis": analysis,
-          })
+          # ── Persist: save structured analysis ─────────────────────────────────
+          await repo.save_analysis(session_id, analysis)
 
-          yield _sse("done", {
-               "session_id": session_id,
-               "next_stage": "follow_up_chat",
-          })
+          yield _sse("analysis", {"session_id": session_id, "analysis": analysis})
+          yield _sse("done", {"session_id": session_id, "next_stage": "follow_up_chat"})
 
      except Exception as exc:
           logger.exception("stream_analysis_sse error session=%s", session_id)
           yield _sse("error", {"message": str(exc), "session_id": session_id})
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stage 4 — Follow-up chat streaming
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Stage 4 — Follow-up chat streaming ──────────────────────────────────────
 
 async def stream_chat_sse(
-    agent,
-    message: str,
-    session_id: str,
-    user_id: str,
+     agent,
+     repo: SessionRepository,
+     message: str,
+     session_id: str,
+     user_id: str,
 ) -> AsyncGenerator[str, None]:
      """
      Stage 4 SSE generator.
-
-     Streams each token as a 'token' event so the frontend can render the reply
-     incrementally.  Ends with a 'done' event carrying the full assembled text.
-
-     The agent has the complete conversation history from MongoDB:
-     client description → questions → answers → analysis → prior chat turns.
-     Every reply is fully contextualised without any manual history passing.
+     Saves user message before streaming, saves assistant reply after done.
+     Both messages get unique IDs returned in the 'done' event.
      """
      config = _make_config(session_id, user_id, "follow_up_chat")
      full_response = ""
 
      try:
-          yield _sse("start", {"session_id": session_id})
+          # ── Persist: save user message ────────────────────────────────────────
+          user_msg_id = await repo.append_chat_message(session_id, "user", message)
+
+          yield _sse("start", {"session_id": session_id, "user_message_id": user_msg_id})
 
           async for chunk, _ in agent.astream(
                {"messages": [{"role": "user", "content": message}]},
@@ -292,8 +275,15 @@ async def stream_chat_sse(
                full_response += token
                yield _sse("token", {"content": token})
 
+          # ── Persist: save assistant reply ─────────────────────────────────────
+          assistant_msg_id = await repo.append_chat_message(
+               session_id, "assistant", full_response
+          )
+
           yield _sse("done", {
                "session_id": session_id,
+               "user_message_id": user_msg_id,
+               "assistant_message_id": assistant_msg_id,
                "full_response": full_response,
           })
 
