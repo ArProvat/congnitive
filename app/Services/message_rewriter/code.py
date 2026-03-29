@@ -10,17 +10,17 @@ class RefineMessageService:
      def __init__(self):
           self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-     async def refine_message(self, message:str):
+     async def refine_message(self, message:str, registry):
           if not message.strip():
                raise HTTPException(status_code=400, detail="Message cannot be empty.")
-
+          print("check rewriter",registry.rewriter )
           try:
                completion = self.client.chat.completions.create(
                     model="gpt-4o-mini",
                     temperature=0.4,
                     response_format={"type": "json_object"},
                     messages=[
-                         {"role": "system", "content": REWRITER_SYSTEM_PROMPT},
+                         {"role": "system", "content": registry.rewriter},
                          {"role": "user", "content": f"Refine this message:\n\n{message}"},
                     ],
                )

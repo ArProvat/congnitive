@@ -2,12 +2,24 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.Services.person_analysis.router import router as analysis_router
 from app.Services.message_rewriter.router import router as rewriter_router
+from contextlib import asynccontextmanager
+from app.prompt.prompt_register import prompt_registry
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ──────────────────────────────────────────────────────────────
+    prompt_registry.init(
+        service_account_path="app/config/serviceAccountKey.json",
+        poll_interval=60          # re-fetch every 60 seconds
+    )
+    yield
+    # ── Shutdown (cleanup if needed) ─────────────────────────────────────────
 
 
 app = FastAPI(
      title="Cognitive API",
      version="1.0.0",
+     lifespan=lifespan
 )
 
 app.add_middleware(
