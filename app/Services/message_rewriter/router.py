@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException,Depends
 from app.Services.message_rewriter.code import RefineMessageService
 from app.Services.message_rewriter.schema import RefineRequest, RefineResponse
 from app.config.settings import get_registry

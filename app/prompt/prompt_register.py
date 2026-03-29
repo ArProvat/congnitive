@@ -58,18 +58,23 @@ class PromptRegistry:
     # ── Firebase sync ─────────────────────────────────────────────────────────
 
     def fetch_and_update(self):
-        try:
-            template = remote_config.get_server_template()
-            config = remote_config.init_server_config(template, {})
+          try:
+               # ✅ Correct sync API — get_template() not get_server_template()
+               template = remote_config.get_template()
 
-            with self._lock:
-                for key in self._DEFAULTS:
-                    value = config.get_string(key)
-                    self._prompts[key] = value if value else self._DEFAULTS[key]
+               with self._lock:
+                    for key in self._DEFAULTS:
+                         param = template.parameters.get(key)
 
-            logger.info("PromptRegistry refreshed from Remote Config.")
-        except Exception as e:
-            logger.error(f"Remote Config fetch failed: {e} — using cached values.")
+                         if param and param.default_value:
+                              value = param.default_value.value   # ✅ correct way to read value
+                              self._prompts[key] = value if value else self._DEFAULTS[key]
+                         else:
+                              self._prompts[key] = self._DEFAULTS[key]
+
+               logger.info("PromptRegistry refreshed from Remote Config.")
+          except Exception as e:
+               logger.error(f"Remote Config fetch failed: {e} — using cached values.")
 
     def start_polling(self, interval: int = 60):
         def _loop():
