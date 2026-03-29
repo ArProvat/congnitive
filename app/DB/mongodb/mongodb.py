@@ -86,6 +86,7 @@ class SessionRepository:
                "user_id": user_id,
                "created_at": _now(),
                "updated_at": _now(),
+               "title": None,
                "stage": "questions",
                "client_profile": {
                     "description": client_description,

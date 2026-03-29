@@ -21,14 +21,10 @@ PATCH /api/sessions/{session_id}/analysis                Edit an analysis field
 """
 
 import logging
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi import APIRouter
 from .agent import agent_manager
-from .schema import StartAnalysisRequest, StartResponse, SubmitAnswersRequest, ChatRequest
+from .schema import StartAnalysisRequest, StartResponse, SubmitAnswersRequest, ChatRequest, EditChatMessageRequest, EditAnalysisFieldRequest
 from .streaming import stream_questions_sse, stream_analysis_sse, stream_chat_sse
 
 logging.basicConfig(

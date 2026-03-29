@@ -1,1 +1,2 @@
 .env
+app/config/serviceAccountKey.json

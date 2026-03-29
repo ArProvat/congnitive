@@ -22,17 +22,17 @@ MongoDB client so there is only one connection pool for the whole app.
 """
 import logging
 from langchain.agents import create_agent
-from langchain.openai import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.mongodb import MongoDBSaver
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from .config import get_settings
-from .db import SessionRepository
+from app.config.settings import get_settings
+from app.DB.mongodb.mongodb import SessionRepository
 from app.prompt.prompt import (
-    QUESTION_GENERATION_SYSTEM_PROMPT,
-    ANALYSIS_SYSTEM_PROMPT,
-    CHAT_SYSTEM_PROMPT,
-)
+     QUESTION_GENERATION_SYSTEM_PROMPT,
+     ANALYSIS_SYSTEM_PROMPT,
+     CHAT_SYSTEM_PROMPT,
+     )
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -80,24 +80,24 @@ class AgentManager:
                api_key=settings.OPENAI_API_KEY,
                max_tokens=4096,
                temperature=0.5,
-               
+
           )
 
-          self._question_agent = create_react_agent(
+          self._question_agent = create_agent(
                model=model,
                tools=[],
                state_modifier=QUESTION_GENERATION_SYSTEM_PROMPT,
                checkpointer=self._checkpointer,
           )
 
-          self._analysis_agent = create_react_agent(
+          self._analysis_agent = create_agent(
                model=model,
                tools=[],
                state_modifier=ANALYSIS_SYSTEM_PROMPT,
                checkpointer=self._checkpointer,
           )
 
-          self._chat_agent = create_react_agent(
+          self._chat_agent = create_agent(
                model=model,
                tools=[],
                state_modifier=CHAT_SYSTEM_PROMPT,
@@ -131,7 +131,7 @@ class AgentManager:
           return self._require(self._chat_agent, "chat_agent")
 
      @property
-     def checkpointer(self) -> AsyncMongoDBSaver:
+     def checkpointer(self) -> MongoDBSaver:
           return self._require(self._checkpointer, "checkpointer")
 
      @property
