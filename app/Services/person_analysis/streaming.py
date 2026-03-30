@@ -20,7 +20,7 @@ from typing import AsyncGenerator
 
 from langchain_core.messages import AIMessageChunk
 
-from app.DB.mongodb.mongodb import SessionRepository
+from app.DB.mongodb.mongodb import MongoDB
 from .schema import AnswerItem
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ def _parse_question(raw: str) -> dict | None:
 
 async def stream_questions_sse(
      agent,
-     repo: SessionRepository,
+     repo: MongoDB,
      user_message: str,
      session_id: str,
      user_id: str,
@@ -194,7 +194,7 @@ def _parse_analysis(raw: str) -> dict | None:
 
 async def stream_analysis_sse(
      agent,
-     repo: SessionRepository,
+     repo: MongoDB,
      answers: list[AnswerItem],
      session_id: str,
      user_id: str,
@@ -245,7 +245,7 @@ async def stream_analysis_sse(
 
 async def stream_chat_sse(
      agent,
-     repo: SessionRepository,
+     repo: MongoDB,
      message: str,
      session_id: str,
      user_id: str,

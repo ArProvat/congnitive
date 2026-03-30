@@ -1,5 +1,5 @@
 """
-SessionRepository — owns every read/write against the `sessions` collection.
+MongoDB — owns every read/write against the `sessions` collection.
 
 Document schema
 ───────────────
@@ -43,6 +43,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+from bson import ObjectId
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -57,11 +58,12 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
-class SessionRepository:
+class MongoDB:
      COLLECTION = "sessions"
 
      def __init__(self, client: AsyncIOMotorClient, db_name: str) -> None:
           self._col = client[db_name][self.COLLECTION]
+          self._person_col = client[db_name]["persons"]
 
      # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -69,7 +71,7 @@ class SessionRepository:
           """Create indexes (idempotent)."""
           await self._col.create_index("user_id")
           await self._col.create_index("created_at")
-          logger.info("SessionRepository indexes ready")
+          logger.info("MongoDB indexes ready")
 
      # ── Stage 1+2 ─────────────────────────────────────────────────────────────
 
@@ -290,3 +292,11 @@ class SessionRepository:
                },
           )
           return result.modified_count > 0
+     
+     async def get_person(self, person_id: str, user_id: str) -> dict | None:
+          """Return the full person document, or None if not found."""
+          doc = await self._person_col.find_one({"_id": ObjectId(person_id), "user_id": user_id},
+          {"_id": 0, "user_id": 0, "created_at": 0, "updated_at": 0, "__v": 0}
+          )
+          
+          return doc

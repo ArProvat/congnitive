@@ -26,6 +26,8 @@ from fastapi import APIRouter
 from .agent import agent_manager
 from .schema import StartAnalysisRequest, StartResponse, SubmitAnswersRequest, ChatRequest, EditChatMessageRequest, EditAnalysisFieldRequest
 from .streaming import stream_questions_sse, stream_analysis_sse, stream_chat_sse
+from app.DB.mongodb.mongodb import MongoDB
+from app.moduls.auth.auth import get_current_user
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,7 +42,7 @@ _SSE_HEADERS = {
 }
 
 router = APIRouter()
-
+mongodb = MongoDB()
 
 
 
@@ -52,7 +54,7 @@ router = APIRouter()
     summary="Stage 1 — reserve session_id",
     tags=["Analysis"],
 )
-async def start_analysis(body: StartAnalysisRequest) -> StartResponse:
+async def start_analysis(body: StartAnalysisRequest,user:dict=Depends(get_current_user)) -> StartResponse:
     """
     Reserve a session_id without starting the stream.
     Useful when the frontend needs the ID before opening EventSource.
@@ -62,7 +64,7 @@ async def start_analysis(body: StartAnalysisRequest) -> StartResponse:
     session_id = body.resolved_session_id()
     return StartResponse(
         session_id=session_id,
-        user_id=body.user_id,
+        user_id=user['user_id'],
         status="ready",
         stream_url="/api/analyze/stream",
     )
@@ -73,7 +75,7 @@ async def start_analysis(body: StartAnalysisRequest) -> StartResponse:
     summary="Stage 1+2 — input + stream questions (SSE)",
     tags=["Analysis"],
 )
-async def stream_questions(body: StartAnalysisRequest):
+async def stream_questions(body: StartAnalysisRequest,user:dict=Depends(get_current_user)):
     """
     Creates the session document in MongoDB, then streams diagnostic questions.
  
@@ -90,9 +92,8 @@ async def stream_questions(body: StartAnalysisRequest):
             repo=agent_manager.session_repo,
             user_message=_build_input_message(body),
             session_id=session_id,
-            user_id=body.user_id,
-            client_description=body.client_description,
-            client_type=body.client_type,
+            user_id=user['user_id'],
+            client_description=body.situation_description,
         ),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
@@ -104,7 +105,7 @@ async def stream_questions(body: StartAnalysisRequest):
     summary="Stage 3 — submit answers + stream analysis (SSE)",
     tags=["Analysis"],
 )
-async def submit_answers(body: SubmitAnswersRequest):
+async def submit_answers(body: SubmitAnswersRequest,user:dict=Depends(get_current_user) ):
     """
     Saves the answers, runs the analysis agent, streams the result.
  
@@ -114,7 +115,7 @@ async def submit_answers(body: SubmitAnswersRequest):
     (tones, scores, conflict_points, recommendation, etc.)
     """
     logger.info("Stage 3 | session=%s user=%s answers=%d",
-                body.session_id, body.user_id, len(body.answers))
+                body.session_id, user['user_id'], len(body.answers))
  
     return StreamingResponse(
         stream_analysis_sse(
@@ -122,7 +123,7 @@ async def submit_answers(body: SubmitAnswersRequest):
             repo=agent_manager.session_repo,
             answers=body.answers,
             session_id=body.session_id,
-            user_id=body.user_id,
+            user_id=user['user_id'],
         ),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
@@ -134,7 +135,7 @@ async def submit_answers(body: SubmitAnswersRequest):
     summary="Stage 4 — follow-up chat (SSE)",
     tags=["Analysis"],
 )
-async def chat(body: ChatRequest):
+async def chat(body: ChatRequest,user:dict=Depends(get_current_user)):
     """
     Stream a follow-up chat reply.  Both the user message and the assistant
     reply are persisted to the session document with unique IDs.
@@ -153,7 +154,7 @@ async def chat(body: ChatRequest):
             repo=agent_manager.session_repo,
             message=body.message,
             session_id=body.session_id,
-            user_id=body.user_id,
+            user_id=user['user_id'],
         ),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
@@ -169,7 +170,7 @@ async def chat(body: ChatRequest):
     summary="List all sessions for a user",
     tags=["Session History"],
 )
-async def list_sessions(user_id: str):
+async def list_sessions(user:dict=Depends(get_current_user)):
     """
     Returns a lightweight list of all sessions for the given user,
     sorted newest-first.
@@ -180,8 +181,8 @@ async def list_sessions(user_id: str):
     Full session data (questions, answers, full analysis, chat messages)
     is excluded — use GET /api/sessions/{session_id} for that.
     """
-    sessions = await agent_manager.session_repo.list_sessions(user_id)
-    return {"user_id": user_id, "total": len(sessions), "sessions": sessions}
+    sessions = await agent_manager.session_repo.list_sessions(user['user_id'])
+    return {"user_id": user['user_id'], "total": len(sessions), "sessions": sessions}
  
  
 @router.get(
@@ -189,7 +190,7 @@ async def list_sessions(user_id: str):
     summary="Get full session detail",
     tags=["Session History"],
 )
-async def get_session(session_id: str):
+async def get_session(session_id: str,user:dict=Depends(get_current_user)):
     """
     Returns the complete session document:
       - client_profile
@@ -218,6 +219,7 @@ async def edit_chat_message(
     session_id: str,
     message_id: str,
     body: EditChatMessageRequest,
+    user:dict=Depends(get_current_user)
 ):
     """
     Update the content of a single chat message.
@@ -251,7 +253,7 @@ async def edit_chat_message(
     summary="Edit a field in the analysis",
     tags=["Edit"],
 )
-async def edit_analysis_field(session_id: str, body: EditAnalysisFieldRequest):
+async def edit_analysis_field(session_id: str, body: EditAnalysisFieldRequest ,user:dict=Depends(get_current_user)):
     """
     Update any field (or nested sub-field) inside the analysis object.
  
@@ -288,8 +290,9 @@ async def edit_analysis_field(session_id: str, body: EditAnalysisFieldRequest):
  
 # ─── Helper ───────────────────────────────────────────────────────────────────
  
-def _build_input_message(body: StartAnalysisRequest) -> str:
-    parts = [f"Client description: {body.client_description}"]
-    if body.client_type:
-        parts.append(f"Client type / category: {body.client_type}")
+async def _build_input_message(body: StartAnalysisRequest,user_id:str) -> str:
+    parts = [f"Situation description: {body.situation_description}"]    
+    person = await mongodb.get_person(body.person_id, user_id)
+    if person:
+        parts.append(f"Person description: {person}")
     return "\n".join(parts)

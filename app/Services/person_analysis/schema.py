@@ -6,9 +6,8 @@ import uuid
 # ─── Shared ───────────────────────────────────────────────────────────────────
 
 class StartAnalysisRequest(BaseModel):
-    user_id: str = Field(..., description="The app user's ID")
-    client_description: str = Field(..., description="Description of the client to analyse")
-    client_type: Optional[str] = Field(None, description="Optional client category label")
+    person_id: str = Field(..., description="Person ID")
+    situation_description: str = Field(..., description="Description of the situation")
     session_id: Optional[str] = Field(
         default=None,
         description="Omit to create a new session; supply to resume an existing one",
@@ -20,7 +19,6 @@ class StartAnalysisRequest(BaseModel):
 
 class StartResponse(BaseModel):
     session_id: str
-    user_id: str
     status: str
     stream_url: str
 
@@ -58,11 +56,6 @@ class SubmitAnswersRequest(BaseModel):
     answers: list[AnswerItem] = Field(..., min_length=1)
 
 
-class EmotionScores(BaseModel):
-    clarity: int
-    stress: int
-    trust: int
-    empathy: int
 
 
 class ConflictPoint(BaseModel):
