@@ -17,7 +17,7 @@ Stage 1 + 2  →  question_agent   (thread written for the first time)
 Stage 3      →  analysis_agent   (reads Q1/2 history, appends answers + analysis)
 Stage 4      →  chat_agent       (reads full history, appends each Q&A turn)
 
-A SessionRepository is also initialised here and shares the same
+A MongoDB is also initialised here and shares the same
 MongoDB client so there is only one connection pool for the whole app.
 """
 import logging
@@ -27,7 +27,7 @@ from langgraph.checkpoint.mongodb import MongoDBSaver
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.config.settings import get_settings
-from app.DB.mongodb.mongodb import SessionRepository
+from app.DB.mongodb.mongodb import MongoDB
 from app.prompt.prompt import (
      QUESTION_GENERATION_SYSTEM_PROMPT,
      ANALYSIS_SYSTEM_PROMPT,
@@ -42,13 +42,13 @@ class AgentManager:
      """
      Initialised once at app startup (FastAPI lifespan).
      All three agents share the same checkpointer → same MongoDB thread.
-     The SessionRepository shares the same motor client.
+     The MongoDB shares the same motor client.
      """
 
      def __init__(self) -> None:
           self._mongo_client: AsyncIOMotorClient | None = None
           self._checkpointer: MongoDBSaver | None = None
-          self._session_repo: SessionRepository | None = None
+          self._session_repo: MongoDB | None = None
           self._question_agent = None
           self._analysis_agent = None
           self._chat_agent = None
@@ -67,13 +67,13 @@ class AgentManager:
           await self._checkpointer.setup()
           logger.info("MongoDB checkpointer ready  db=%s", settings.mongodb_db_name)
 
-          # SessionRepository reuses the same motor client
-          self._session_repo = SessionRepository(
+          # MongoDB reuses the same motor client
+          self._session_repo = MongoDB(
                client=self._mongo_client,
                db_name=settings.mongodb_db_name,
           )
           await self._session_repo.setup()
-          logger.info("SessionRepository ready")
+          logger.info("MongoDB ready")
 
           model = ChatOpenAI(
                model="gpt-4o-mini",
@@ -135,7 +135,7 @@ class AgentManager:
           return self._require(self._checkpointer, "checkpointer")
 
      @property
-     def session_repo(self) -> SessionRepository:
+     def session_repo(self) -> MongoDB:
           return self._require(self._session_repo, "session_repo")
 
 
